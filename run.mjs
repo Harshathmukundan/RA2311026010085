@@ -45,9 +45,9 @@ async function main() {
 
   await Log("backend", "info", "handler", `Returning top ${top.length} priority notifications`);
 
-  console.log(`\n🔔 Priority Inbox — Top ${TOP_N}\n${"=".repeat(60)}`);
+  console.log(`\nPriority Inbox — Top ${TOP_N}\n${"=".repeat(60)}`);
   top.forEach((n, i) => {
-    const emoji = n.Type === "Placement" ? "💼" : n.Type === "Result" ? "" : "";
+    const emoji = n.Type === "Placement" ? "" : n.Type === "Result" ? "" : "";
     console.log(`${i + 1}. ${emoji} [${n.Type}] ${n.Message}`);
     console.log(`   ${n.Timestamp}  |  ID: ${n.ID}\n`);
   });
