@@ -1,22 +1,13 @@
-Remove the lock file first, then fix it:
-
-```bash
-# Remove the lock file
-rm /Users/harshath/Downloads/RA2311026010085/.git/index.lock
-
-# Now remove node_modules from git tracking
 cd /Users/harshath/Downloads/RA2311026010085
-git rm -r --cached stage2/node_modules
-git rm -r --cached stage2/.next 2>/dev/null || true
 
-# Add gitignore
-cat << 'EOF' > stage2/.gitignore
-node_modules/
-.next/
-EOF
-
-# Commit and push
+# Commit the pending changes first
 git add .
-git commit -m "Stage 2: remove node_modules from git"
-git push
-```
+git commit -m "add gitignore"
+
+# Now rewrite history to remove node_modules
+FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --index-filter \
+  'git rm -rf --cached --ignore-unmatch stage2/node_modules' \
+  --prune-empty --tag-name-filter cat -- --all
+
+# Force push
+git push origin main --force
