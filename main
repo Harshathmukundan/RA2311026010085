@@ -1,0 +1,568 @@
+Perfect! Now paste these one by one:
+
+**lib/api.ts:**
+```bash
+cat << 'EOF' > stage2/lib/api.ts
+export const TOKEN =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJNYXBDbGFpbXMiOnsiYXVkIjoiaHR0cDovLzIwLjI0NC41Ni4xNDQvZXZhbHVhdGlvbi1zZXJ2aWNlIiwiZW1haWwiOiJyczU0ODVAc3JtaXN0LmVkdSIsImV4cCI6MTc3NzcwMjUwMiwiaWF0IjoxNzc3NzAxNjAyLCJpc3MiOiJBZmZvcmQgTWVkaWNhbCBUZWNobm9sb2dpZXMgUHJpdmF0ZSBMaW1pdGVkIiwianRpIjoiZDMwYmJkZDAtNzFhMS00MDc0LWFmMzgtYWRmOGMwN2RhMDU5IiwibG9jYWxlIjoiZW4tSU4iLCJuYW1lIjoiaGFyc2hhdGggbXVrdW5kYW4iLCJzdWIiOiJhMTg4YzczMS0yYjNjLTRhYjMtYWIwMy0zOTZhMjFlNDM3ZmQifSwiZW1haWwiOiJyczU0ODVAc3JtaXN0LmVkdSIsIm5hbWUiOiJoYXJzaGF0aCBtdWt1bmRhbiIsInJvbGxObyI6InJhMjMxMTAyNjAxMDA4NSIsImFjY2Vzc0NvZGUiOiJRa2JweEgiLCJjbGllbnRJRCI6ImExODhjNzMxLTJiM2MtNGFiMy1hYjAzLTM5NmEyMWU0MzdmZCIsImNsaWVudFNlY3JldCI6IlFwblhDWWJhdUt2V0padVYifQ.b9ZB5ZuUHGttU22t4fj8qsQNnRv2Pyl69JBOhSBFxs0";
+
+const BASE_URL = "http://20.207.122.201/evaluation-service";
+
+export type NotificationType = "Placement" | "Result" | "Event";
+
+export interface Notification {
+  ID: string;
+  Type: NotificationType;
+  Message: string;
+  Timestamp: string;
+}
+
+export interface FetchNotificationsParams {
+  limit?: number;
+  page?: number;
+  notification_type?: NotificationType | "";
+}
+
+export const TYPE_WEIGHT: Record<NotificationType, number> = {
+  Placement: 3,
+  Result: 2,
+  Event: 1,
+};
+
+export function scoreNotification(n: Notification): number {
+  return TYPE_WEIGHT[n.Type] * 1e12 + new Date(n.Timestamp).getTime();
+}
+
+export async function fetchNotifications(
+  params: FetchNotificationsParams = {}
+): Promise<Notification[]> {
+  const url = new URL(`${BASE_URL}/notifications`);
+  if (params.limit) url.searchParams.set("limit", String(params.limit));
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.notification_type)
+    url.searchParams.set("notification_type", params.notification_type);
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+    cache: "no-store",
+  });
+
+  if (!res.ok) throw new Error(`Failed to fetch notifications: ${res.status}`);
+  const data = await res.json();
+  return data.notifications ?? [];
+}
+
+export async function sendLog(
+  stack: string,
+  level: string,
+  pkg: string,
+  message: string
+): Promise<void> {
+  try {
+    await fetch(`${BASE_URL}/logs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify({ stack, level, package: pkg, message }),
+    });
+  } catch {
+    // silent fail
+  }
+}
+
+export function getPriorityNotifications(
+  notifications: Notification[],
+  topN: number
+): Notification[] {
+  return [...notifications]
+    .sort((a, b) => scoreNotification(b) - scoreNotification(a))
+    .slice(0, topN);
+}
+
+export function formatTimestamp(ts: string): string {
+  const date = new Date(ts);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "yesterday";
+  return date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+EOF
+```
+
+**components/Navbar.tsx:**
+```bash
+cat << 'EOF' > stage2/components/Navbar.tsx
+"use client";
+import React from "react";
+import { AppBar, Toolbar, Typography, Button, Box, Badge } from "@mui/material";
+import NotificationsIcon from "@mui/icons-material/Notifications";
+import StarIcon from "@mui/icons-material/Star";
+import { usePathname, useRouter } from "next/navigation";
+
+interface NavbarProps {
+  unreadCount?: number;
+}
+
+export default function Navbar({ unreadCount = 0 }: NavbarProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+
+  return (
+    <AppBar
+      position="sticky"
+      elevation={0}
+      sx={{
+        background: "rgba(10,10,15,0.85)",
+        backdropFilter: "blur(20px)",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+      }}
+    >
+      <Toolbar sx={{ gap: 2 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexGrow: 1 }}>
+          <Box
+            sx={{
+              width: 36, height: 36, borderRadius: "10px",
+              background: "linear-gradient(135deg, #6C63FF, #FF6584)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <NotificationsIcon sx={{ fontSize: 20, color: "#fff" }} />
+          </Box>
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 800,
+              background: "linear-gradient(135deg, #6C63FF, #FF6584)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              letterSpacing: "-0.02em",
+            }}
+          >
+            CampusNotify
+          </Typography>
+        </Box>
+
+        <Button
+          startIcon={<Badge badgeContent={unreadCount} color="error" max={99}><NotificationsIcon /></Badge>}
+          onClick={() => router.push("/")}
+          variant={pathname === "/" ? "contained" : "text"}
+          sx={{
+            borderRadius: "12px", textTransform: "none", fontWeight: 600,
+            ...(pathname === "/" ? { background: "linear-gradient(135deg, #6C63FF, #9B94FF)" } : { color: "#8888AA" }),
+          }}
+        >
+          All Notifications
+        </Button>
+
+        <Button
+          startIcon={<StarIcon />}
+          onClick={() => router.push("/priority-inbox")}
+          variant={pathname === "/priority-inbox" ? "contained" : "text"}
+          sx={{
+            borderRadius: "12px", textTransform: "none", fontWeight: 600,
+            ...(pathname === "/priority-inbox" ? { background: "linear-gradient(135deg, #FF6584, #FFB347)" } : { color: "#8888AA" }),
+          }}
+        >
+          Priority Inbox
+        </Button>
+      </Toolbar>
+    </AppBar>
+  );
+}
+EOF
+```
+
+**components/NotificationCard.tsx:**
+```bash
+cat << 'EOF' > stage2/components/NotificationCard.tsx
+"use client";
+import React from "react";
+import { Card, CardContent, Box, Typography, Chip, Tooltip } from "@mui/material";
+import WorkIcon from "@mui/icons-material/Work";
+import AssessmentIcon from "@mui/icons-material/Assessment";
+import EventIcon from "@mui/icons-material/Event";
+import FiberNewIcon from "@mui/icons-material/FiberNew";
+import { Notification, formatTimestamp } from "@/lib/api";
+
+interface NotificationCardProps {
+  notification: Notification;
+  isNew: boolean;
+  rank?: number;
+}
+
+const TYPE_CONFIG = {
+  Placement: { icon: WorkIcon, color: "#00E5A0", bg: "rgba(0,229,160,0.08)", border: "rgba(0,229,160,0.2)", label: "Placement" },
+  Result: { icon: AssessmentIcon, color: "#6C63FF", bg: "rgba(108,99,255,0.08)", border: "rgba(108,99,255,0.2)", label: "Result" },
+  Event: { icon: EventIcon, color: "#FFB347", bg: "rgba(255,179,71,0.08)", border: "rgba(255,179,71,0.2)", label: "Event" },
+};
+
+export default function NotificationCard({ notification, isNew, rank }: NotificationCardProps) {
+  const config = TYPE_CONFIG[notification.Type];
+  const Icon = config.icon;
+
+  return (
+    <Card
+      sx={{
+        mb: 1.5,
+        background: isNew ? `linear-gradient(135deg, ${config.bg}, rgba(19,19,26,0.9))` : "rgba(19,19,26,0.6)",
+        border: isNew ? `1px solid ${config.border}` : "1px solid rgba(255,255,255,0.05)",
+        transition: "all 0.2s ease",
+        "&:hover": {
+          transform: "translateY(-2px)",
+          boxShadow: isNew ? `0 8px 32px ${config.bg}` : "0 8px 32px rgba(0,0,0,0.3)",
+          border: `1px solid ${config.border}`,
+        },
+      }}
+    >
+      <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
+          {rank !== undefined ? (
+            <Box sx={{
+              minWidth: 36, height: 36, borderRadius: "10px",
+              background: `linear-gradient(135deg, ${config.color}22, ${config.color}44)`,
+              border: `1px solid ${config.color}44`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 800, fontSize: "0.9rem", color: config.color,
+            }}>
+              #{rank}
+            </Box>
+          ) : (
+            <Box sx={{ minWidth: 36, height: 36, borderRadius: "10px", background: config.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon sx={{ fontSize: 20, color: config.color }} />
+            </Box>
+          )}
+
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 0.5 }}>
+              <Chip label={config.label} size="small" sx={{ background: config.bg, color: config.color, border: `1px solid ${config.border}`, height: 22, fontSize: "0.7rem" }} />
+              {isNew && <Chip icon={<FiberNewIcon sx={{ fontSize: "14px !important" }} />} label="New" size="small" color="error" sx={{ height: 22, fontSize: "0.7rem" }} />}
+            </Box>
+            <Typography variant="body1" sx={{ fontWeight: isNew ? 600 : 400, color: isNew ? "#F0F0FF" : "#8888AA", fontSize: "0.95rem", mb: 0.5, textTransform: "capitalize" }}>
+              {notification.Message}
+            </Typography>
+            <Tooltip title={notification.Timestamp} placement="bottom-start">
+              <Typography variant="caption" sx={{ color: "#555577", cursor: "default" }}>
+                {formatTimestamp(notification.Timestamp)}
+              </Typography>
+            </Tooltip>
+          </Box>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+}
+EOF
+```
+
+**app/layout.tsx:**
+```bash
+cat << 'EOF' > stage2/app/layout.tsx
+"use client";
+import React from "react";
+import { ThemeProvider, createTheme, CssBaseline } from "@mui/material";
+import { AppRouterCacheProvider } from "@mui/material-nextjs/v14-appRouter";
+
+const theme = createTheme({
+  palette: {
+    mode: "dark",
+    primary: { main: "#6C63FF" },
+    secondary: { main: "#FF6584" },
+    background: { default: "#0A0A0F", paper: "#13131A" },
+    text: { primary: "#F0F0FF", secondary: "#8888AA" },
+    success: { main: "#00E5A0" },
+    warning: { main: "#FFB347" },
+    error: { main: "#FF6B6B" },
+  },
+  typography: {
+    fontFamily: '"DM Sans", "Helvetica Neue", Arial, sans-serif',
+    h4: { fontWeight: 800, letterSpacing: "-0.02em" },
+    h5: { fontWeight: 700 },
+    h6: { fontWeight: 600 },
+  },
+  shape: { borderRadius: 16 },
+  components: {
+    MuiCard: { styleOverrides: { root: { backgroundImage: "none", border: "1px solid rgba(255,255,255,0.06)" } } },
+    MuiChip: { styleOverrides: { root: { fontWeight: 600, fontSize: "0.75rem" } } },
+  },
+});
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <title>Campus Notifications</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+      </head>
+      <body>
+        <AppRouterCacheProvider>
+          <ThemeProvider theme={theme}>
+            <CssBaseline />
+            {children}
+          </ThemeProvider>
+        </AppRouterCacheProvider>
+      </body>
+    </html>
+  );
+}
+EOF
+```
+
+**app/page.tsx:**
+```bash
+cat << 'EOF' > stage2/app/page.tsx
+"use client";
+import React, { useEffect, useState, useCallback } from "react";
+import { Box, Container, Typography, ToggleButtonGroup, ToggleButton, Alert, Pagination, Divider, Skeleton } from "@mui/material";
+import WorkIcon from "@mui/icons-material/Work";
+import AssessmentIcon from "@mui/icons-material/Assessment";
+import EventIcon from "@mui/icons-material/Event";
+import AllInboxIcon from "@mui/icons-material/AllInbox";
+import Navbar from "@/components/Navbar";
+import NotificationCard from "@/components/NotificationCard";
+import { fetchNotifications, sendLog, Notification, NotificationType } from "@/lib/api";
+
+const VIEWED_KEY = "viewed_notification_ids";
+
+function getViewedIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try { return new Set(JSON.parse(localStorage.getItem(VIEWED_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+
+function markAsViewed(ids: string[]) {
+  if (typeof window === "undefined") return;
+  const existing = getViewedIds();
+  ids.forEach((id) => existing.add(id));
+  localStorage.setItem(VIEWED_KEY, JSON.stringify([...existing]));
+}
+
+export default function AllNotificationsPage() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<NotificationType | "">("");
+  const [page, setPage] = useState(1);
+  const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
+
+  const loadNotifications = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await sendLog("frontend", "info", "page", `Loading all notifications page=${page} type=${filter || "all"}`);
+      const data = await fetchNotifications({ limit: 10, page, notification_type: filter || undefined });
+      setNotifications(data);
+      setTimeout(() => { markAsViewed(data.map((n) => n.ID)); setViewedIds(getViewedIds()); }, 3000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load";
+      setError(msg);
+      await sendLog("frontend", "error", "api", `Failed to fetch notifications: ${msg}`);
+    } finally { setLoading(false); }
+  }, [filter, page]);
+
+  useEffect(() => { setViewedIds(getViewedIds()); }, []);
+  useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
+  const unreadCount = notifications.filter((n) => !viewedIds.has(n.ID)).length;
+  const newOnes = notifications.filter((n) => !viewedIds.has(n.ID));
+  const oldOnes = notifications.filter((n) => viewedIds.has(n.ID));
+
+  return (
+    <Box sx={{ minHeight: "100vh", background: "#0A0A0F" }}>
+      <Navbar unreadCount={unreadCount} />
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Box sx={{ mb: 4 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1 }}>
+            <AllInboxIcon sx={{ color: "#6C63FF", fontSize: 28 }} />
+            <Typography variant="h4" sx={{ color: "#F0F0FF" }}>All Notifications</Typography>
+          </Box>
+          <Typography variant="body2" sx={{ color: "#8888AA" }}>Stay up to date with placements, results, and campus events</Typography>
+        </Box>
+
+        <ToggleButtonGroup value={filter} exclusive onChange={(_, val) => { setFilter(val ?? ""); setPage(1); }} size="small"
+          sx={{ mb: 3, "& .MuiToggleButton-root": { borderRadius: "10px !important", textTransform: "none", fontWeight: 600, border: "1px solid rgba(255,255,255,0.1) !important", color: "#8888AA", px: 2, "&.Mui-selected": { color: "#F0F0FF" } }, gap: 1 }}>
+          <ToggleButton value="">All</ToggleButton>
+          <ToggleButton value="Placement"><WorkIcon sx={{ fontSize: 16, mr: 0.5 }} />Placement</ToggleButton>
+          <ToggleButton value="Result"><AssessmentIcon sx={{ fontSize: 16, mr: 0.5 }} />Result</ToggleButton>
+          <ToggleButton value="Event"><EventIcon sx={{ fontSize: 16, mr: 0.5 }} />Event</ToggleButton>
+        </ToggleButtonGroup>
+
+        <Divider sx={{ borderColor: "rgba(255,255,255,0.06)", mb: 3 }} />
+
+        {error && <Alert severity="error" sx={{ mb: 2, borderRadius: "12px" }}>{error}</Alert>}
+
+        {loading ? Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} variant="rectangular" height={80} sx={{ mb: 1.5, borderRadius: "16px", bgcolor: "rgba(255,255,255,0.05)" }} />
+        )) : notifications.length === 0 ? (
+          <Box sx={{ textAlign: "center", py: 8 }}>
+            <AllInboxIcon sx={{ fontSize: 64, color: "#333355", mb: 2 }} />
+            <Typography variant="h6" sx={{ color: "#555577" }}>No notifications found</Typography>
+          </Box>
+        ) : (
+          <>
+            {newOnes.length > 0 && (
+              <>
+                <Typography variant="caption" sx={{ color: "#6C63FF", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", mb: 1, display: "block" }}>New</Typography>
+                {newOnes.map((n) => <NotificationCard key={n.ID} notification={n} isNew={true} />)}
+                <Divider sx={{ borderColor: "rgba(255,255,255,0.06)", my: 2 }} />
+                <Typography variant="caption" sx={{ color: "#555577", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", mb: 1, display: "block" }}>Earlier</Typography>
+              </>
+            )}
+            {oldOnes.map((n) => <NotificationCard key={n.ID} notification={n} isNew={false} />)}
+          </>
+        )}
+
+        {!loading && notifications.length > 0 && (
+          <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
+            <Pagination count={3} page={page} onChange={(_, val) => setPage(val)} color="primary"
+              sx={{ "& .MuiPaginationItem-root": { borderRadius: "10px", color: "#8888AA", "&.Mui-selected": { background: "linear-gradient(135deg, #6C63FF, #9B94FF)", color: "#fff" } } }} />
+          </Box>
+        )}
+      </Container>
+    </Box>
+  );
+}
+EOF
+```
+
+**app/priority-inbox/page.tsx:**
+```bash
+cat << 'EOF' > stage2/app/priority-inbox/page.tsx
+"use client";
+import React, { useEffect, useState, useCallback } from "react";
+import { Box, Container, Typography, Slider, Alert, ToggleButtonGroup, ToggleButton, Divider, Chip, Skeleton, Paper } from "@mui/material";
+import StarIcon from "@mui/icons-material/Star";
+import WorkIcon from "@mui/icons-material/Work";
+import AssessmentIcon from "@mui/icons-material/Assessment";
+import EventIcon from "@mui/icons-material/Event";
+import Navbar from "@/components/Navbar";
+import NotificationCard from "@/components/NotificationCard";
+import { fetchNotifications, sendLog, getPriorityNotifications, Notification, NotificationType, TYPE_WEIGHT } from "@/lib/api";
+
+const VIEWED_KEY = "viewed_notification_ids";
+function getViewedIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try { return new Set(JSON.parse(localStorage.getItem(VIEWED_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+
+export default function PriorityInboxPage() {
+  const [allNotifications, setAllNotifications] = useState<Notification[]>([]);
+  const [priorityList, setPriorityList] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [topN, setTopN] = useState(10);
+  const [typeFilter, setTypeFilter] = useState<NotificationType | "">("");
+  const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
+
+  const loadNotifications = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      await sendLog("frontend", "info", "page", `Loading priority inbox topN=${topN}`);
+      const data = await fetchNotifications({ notification_type: typeFilter || undefined });
+      setAllNotifications(data);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load";
+      setError(msg);
+      await sendLog("frontend", "error", "api", `Priority inbox fetch failed: ${msg}`);
+    } finally { setLoading(false); }
+  }, [typeFilter]);
+
+  useEffect(() => { setViewedIds(getViewedIds()); }, []);
+  useEffect(() => { loadNotifications(); }, [loadNotifications]);
+  useEffect(() => { setPriorityList(getPriorityNotifications(allNotifications, topN)); }, [allNotifications, topN]);
+
+  const counts = { Placement: priorityList.filter((n) => n.Type === "Placement").length, Result: priorityList.filter((n) => n.Type === "Result").length, Event: priorityList.filter((n) => n.Type === "Event").length };
+  const unreadCount = allNotifications.filter((n) => !viewedIds.has(n.ID)).length;
+  const colors: Record<NotificationType, string> = { Placement: "#00E5A0", Result: "#6C63FF", Event: "#FFB347" };
+
+  return (
+    <Box sx={{ minHeight: "100vh", background: "#0A0A0F" }}>
+      <Navbar unreadCount={unreadCount} />
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Box sx={{ mb: 4 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1 }}>
+            <StarIcon sx={{ color: "#FF6584", fontSize: 28 }} />
+            <Typography variant="h4" sx={{ color: "#F0F0FF" }}>Priority Inbox</Typography>
+          </Box>
+          <Typography variant="body2" sx={{ color: "#8888AA" }}>Top notifications ranked by importance (Placement &gt; Result &gt; Event) and recency</Typography>
+        </Box>
+
+        <Paper sx={{ p: 2, mb: 3, background: "rgba(19,19,26,0.8)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "16px" }}>
+          <Typography variant="caption" sx={{ color: "#555577", display: "block", mb: 1.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>Priority Weights</Typography>
+          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+            {(["Placement", "Result", "Event"] as NotificationType[]).map((type) => (
+              <Box key={type} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Box sx={{ width: 28, height: 28, borderRadius: "8px", background: `${colors[type]}22`, border: `1px solid ${colors[type]}44`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "0.8rem", color: colors[type] }}>{TYPE_WEIGHT[type]}</Box>
+                <Typography variant="body2" sx={{ color: "#8888AA", fontWeight: 600 }}>{type}</Typography>
+              </Box>
+            ))}
+          </Box>
+        </Paper>
+
+        <Box sx={{ mb: 3, display: "flex", gap: 3, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <Box sx={{ flex: 1, minWidth: 200 }}>
+            <Typography variant="body2" sx={{ color: "#8888AA", mb: 1, fontWeight: 600 }}>
+              Show top <Box component="span" sx={{ color: "#FF6584", fontWeight: 800 }}>{topN}</Box> notifications
+            </Typography>
+            <Slider value={topN} onChange={(_, val) => setTopN(val as number)} min={5} max={20} step={5}
+              marks={[{ value: 5, label: "5" }, { value: 10, label: "10" }, { value: 15, label: "15" }, { value: 20, label: "20" }]}
+              sx={{ color: "#FF6584", "& .MuiSlider-mark": { background: "#333355" }, "& .MuiSlider-markLabel": { color: "#555577" } }} />
+          </Box>
+          <Box>
+            <Typography variant="body2" sx={{ color: "#8888AA", mb: 1, fontWeight: 600 }}>Filter by type</Typography>
+            <ToggleButtonGroup value={typeFilter} exclusive onChange={(_, val) => setTypeFilter(val ?? "")} size="small"
+              sx={{ "& .MuiToggleButton-root": { borderRadius: "10px !important", textTransform: "none", fontWeight: 600, border: "1px solid rgba(255,255,255,0.1) !important", color: "#8888AA", px: 1.5, "&.Mui-selected": { color: "#F0F0FF" } }, gap: 0.5 }}>
+              <ToggleButton value="">All</ToggleButton>
+              <ToggleButton value="Placement"><WorkIcon sx={{ fontSize: 14, mr: 0.5 }} />Placement</ToggleButton>
+              <ToggleButton value="Result"><AssessmentIcon sx={{ fontSize: 14, mr: 0.5 }} />Result</ToggleButton>
+              <ToggleButton value="Event"><EventIcon sx={{ fontSize: 14, mr: 0.5 }} />Event</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        </Box>
+
+        {!loading && priorityList.length > 0 && (
+          <Box sx={{ display: "flex", gap: 1.5, mb: 3, flexWrap: "wrap" }}>
+            {(["Placement", "Result", "Event"] as NotificationType[]).map((type) => counts[type] > 0 && (
+              <Chip key={type} label={`${counts[type]} ${type}`} size="small" sx={{ background: `${colors[type]}11`, color: colors[type], border: `1px solid ${colors[type]}33`, fontWeight: 600 }} />
+            ))}
+          </Box>
+        )}
+
+        <Divider sx={{ borderColor: "rgba(255,255,255,0.06)", mb: 3 }} />
+        {error && <Alert severity="error" sx={{ mb: 2, borderRadius: "12px" }}>{error}</Alert>}
+
+        {loading ? Array.from({ length: topN > 10 ? 10 : topN }).map((_, i) => (
+          <Skeleton key={i} variant="rectangular" height={80} sx={{ mb: 1.5, borderRadius: "16px", bgcolor: "rgba(255,255,255,0.05)" }} />
+        )) : priorityList.length === 0 ? (
+          <Box sx={{ textAlign: "center", py: 8 }}>
+            <StarIcon sx={{ fontSize: 64, color: "#333355", mb: 2 }} />
+            <Typography variant="h6" sx={{ color: "#555577" }}>No priority notifications found</Typography>
+          </Box>
+        ) : priorityList.map((n, i) => (
+          <NotificationCard key={n.ID} notification={n} isNew={!viewedIds.has(n.ID)} rank={i + 1} />
+        ))}
+      </Container>
+    </Box>
+  );
+}
+EOF
+```
+
+**Then install and run:**
+```bash
+cd stage2
+npm install
+npm run dev
+```
+
+Open **http://localhost:3000** 🚀
